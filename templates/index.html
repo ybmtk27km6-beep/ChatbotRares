@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f1117">
+    <meta name="description" content="A multimodal AI studio with local Ollama, optional cloud inference, document tools, and an installable web app.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <title>All-in-One AI Studio</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <button class="scrim" id="scrim" aria-label="Close navigation" tabindex="-1"></button>
+      <aside class="sidebar" id="sidebar" aria-label="Application sidebar">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">✦</div>
+          <div class="brand-copy"><strong>AI STUDIO</strong><span>ALL-IN-ONE</span></div>
+          <button class="icon-button mobile-close" id="close-drawer" aria-label="Close menu">×</button>
+        </div>
+
+        <button class="primary-button new-chat" id="new-chat"><span>＋</span> New conversation</button>
+        <div class="sidebar-section conversation-section">
+          <div class="section-heading"><span>RECENT CONVERSATIONS</span><button id="refresh-history" class="icon-button small-icon" title="Refresh">↻</button></div>
+          <div class="conversation-list" id="conversation-list" aria-live="polite"></div>
+        </div>
+
+        <div class="sidebar-controls">
+          <label class="control-label" for="model-select">MODEL</label>
+          <div class="select-row">
+            <select id="model-select" aria-label="Choose model"><option value="">Loading…</option></select>
+            <button class="icon-button" id="refresh-status" title="Refresh model list" aria-label="Refresh model list">↻</button>
+          </div>
+          <div class="engine-badge" id="engine-badge"><span class="status-dot"></span><span id="engine-label">Checking connection…</span></div>
+
+          <label class="control-label" for="persona-select">WORKSPACE PERSONA</label>
+          <select id="persona-select" class="full-select" aria-label="Choose assistant persona">
+            <option>Academic Tutor</option>
+            <option>Software Architect</option>
+            <option>Research Analyst</option>
+            <option>Creative Assistant</option>
+          </select>
+
+          <label class="control-label" for="response-style">RESPONSE STYLE</label>
+          <select id="response-style" class="full-select" aria-label="Choose response style">
+            <option value="concise">Concis</option>
+            <option value="steps">Pas cu pas</option>
+          </select>
+          <label class="search-toggle" for="web-search-toggle">
+            <input id="web-search-toggle" type="checkbox">
+            <span>🌐 Web Search</span>
+            <small>Send this query to free web search</small>
+          </label>
+
+          <label class="control-label" for="voice-select">VOICE & SPEECH RATE</label>
+          <select id="voice-select" class="full-select" aria-label="Choose spoken voice">
+            <option value="">System default</option>
+          </select>
+          <div class="speech-rate-row">
+            <label for="speech-rate">Speech rate</label>
+            <input id="speech-rate" type="range" min="0.7" max="1.3" step="0.1" value="1">
+            <output id="speech-rate-value" for="speech-rate">1.0×</output>
+          </div>
+
+          <div class="sidebar-actions">
+            <button class="tool-button" data-prompt="Give me a quick, practical overview of"><span>⌕</span> Research</button>
+            <button class="tool-button" data-prompt="Help me plan and prioritize"><span>◷</span> Plan</button>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <button class="footer-button" id="theme-toggle"><span id="theme-icon">☼</span><span id="theme-label">Light appearance</span></button>
+          <button class="footer-button" id="install-button" hidden><span>⇩</span><span>Install app</span></button>
+          <div class="privacy-note"><span class="privacy-lock">⌑</span><span>          <strong>Choose your engine</strong><small>Local Ollama or your configured provider</small></span></div>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button class="icon-button menu-button" id="open-drawer" aria-label="Open navigation">☰</button>
+            <div class="title-stack"><span class="eyebrow">YOUR PRIVATE WORKSPACE</span><h1 id="chat-title">New conversation</h1></div>
+          </div>
+          <div class="topbar-right">
+            <button class="icon-button" id="voice-toggle" title="Toggle read aloud" aria-label="Toggle read aloud">◖</button>
+            <button class="icon-button" id="export-button" title="Export Markdown" aria-label="Export Markdown">⇩</button>
+          </div>
+        </header>
+
+        <section class="chat-scroll" id="chat-scroll" aria-label="Conversation">
+          <div class="welcome" id="welcome">
+            <div class="welcome-orb"><span>✦</span></div>
+            <div class="welcome-status"><span class="status-dot"></span><span id="welcome-status">Connecting to your AI</span></div>
+            <h2>Ideas, meet intelligence.</h2>
+            <p>A thoughtful workspace for asking, making, and learning.<br>Choose a prompt to begin.</p>
+            <div class="starter-grid">
+              <button class="starter-card" data-prompt="Explain a fascinating idea in science in a simple, memorable way."><span class="starter-icon violet">✧</span><span><strong>Learn something</strong><small>Make a complex idea click</small></span><b>↗</b></button>
+              <button class="starter-card" data-prompt="Help me design a clean, maintainable software architecture for"><span class="starter-icon blue">⌘</span><span><strong>Design a system</strong><small>Think through a build</small></span><b>↗</b></button>
+              <button class="starter-card" data-prompt="Help me analyze this topic. Separate well-established facts from uncertainty:"><span class="starter-icon amber">⌕</span><span><strong>Explore a question</strong><small>Find clarity and context</small></span><b>↗</b></button>
+              <button class="starter-card" data-prompt="Help me write a vivid, original first draft about"><span class="starter-icon mint">✎</span><span><strong>Create something</strong><small>Turn a spark into a draft</small></span><b>↗</b></button>
+            </div>
+          </div>
+          <div class="messages" id="messages" aria-live="polite"></div>
+        </section>
+
+        <section class="composer-wrap" aria-label="Message composer">
+          <div class="upload-pills" id="upload-pills" aria-live="polite"></div>
+          <form class="composer" id="composer-form">
+            <label class="attach-button" for="file-input" title="Attach documents or images"><span>＋</span><input id="file-input" type="file" accept=".pdf,.txt,.py,.md,.csv,.png,.jpg,.jpeg,.webp" multiple hidden></label>
+            <textarea id="message-input" rows="1" maxlength="20000" placeholder="Message your local AI…" aria-label="Write a message"></textarea>
+            <button class="voice-button" type="button" id="dictate-button" title="Dictate message" aria-label="Dictate message">◉</button>
+            <button class="send-button" type="submit" id="send-button" aria-label="Send message"><span>↑</span></button>
+          </form>
+          <div class="composer-hint"><span>Enter to send</span><i>·</i><span>Shift + Enter for a new line</span><i>·</i><span id="provider-hint">Runs on your device</span></div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+    <dialog class="rename-dialog" id="rename-dialog">
+      <form method="dialog" id="rename-form">
+        <h2>Rename conversation</h2>
+        <input id="rename-input" maxlength="100" autocomplete="off" aria-label="Conversation name">
+        <div class="dialog-actions"><button value="cancel" class="secondary-button">Cancel</button><button id="rename-confirm" value="default" class="primary-button">Save name</button></div>
+      </form>
+    </dialog>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js"></script>
+    <script defer src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js"></script>
+    <script defer src="/static/app.js"></script>
+  </body>
+</html>
