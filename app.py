@@ -291,13 +291,24 @@ def _stream_cloud(
     client = _cloud_client(
         base_and_key, timeout=float(os.environ.get("CLOUD_TIMEOUT", "120"))
     )
-    provider_messages = []
+    provider_messages: list[dict[str, Any]] = []
     for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content_text = message.get("content")
+        if (
+            not isinstance(role, str)
+            or role not in {"system", "user", "assistant"}
+            or not isinstance(content_text, str)
+            or not content_text.strip()
+        ):
+            continue
         images = message.get("images", [])
-        content: str | list[dict[str, Any]] = message["content"]
+        content: str | list[dict[str, Any]] = content_text.strip()
         if images:
             content = [
-                {"type": "text", "text": message["content"]},
+                {"type": "text", "text": content_text.strip()},
                 *[
                     {
                         "type": "image_url",
@@ -310,9 +321,9 @@ def _stream_cloud(
                     for image in images
                 ],
             ]
-        provider_messages.append({"role": message["role"], "content": content})
+        provider_messages.append({"role": role, "content": content})
     stream = client.chat.completions.create(
-        model=model, messages=provider_messages, stream=True
+        model=model, messages=provider_messages, temperature=0.3, stream=True
     )
     for chunk in stream:
         if not chunk.choices:
@@ -654,9 +665,22 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             else:
                 base_and_key = _active_provider()[2]
                 models_response = _cloud_client(base_and_key).models.list()
-                models = [
-                    item.id for item in models_response.data if getattr(item, "id", None)
-                ]
+                excluded_model_markers = (
+                    "whisper",
+                    "orpheus",
+                    "prompt-guard",
+                    "safeguard",
+                )
+                models = []
+                for item in models_response.data:
+                    model_id = getattr(item, "id", None)
+                    if not isinstance(model_id, str) or not model_id.strip():
+                        continue
+                    if any(marker in model_id.lower() for marker in excluded_model_markers):
+                        continue
+                    models.append(model_id)
+                if any(marker in model.lower() for marker in excluded_model_markers):
+                    model = "llama-3.3-70b-versatile"
                 if model not in models:
                     models.insert(0, model)
                 online = True
@@ -1046,10 +1070,13 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 )
             except GeneratorExit:
                 raise
-            except Exception:
+            except Exception as exc:
+                if provider == "cloud":
+                    print("GROQ ERROR:", repr(exc), flush=True)
                 app.logger.exception(
                     "AI streaming failed for provider=%s model=%s", provider, model
                 )
+                cloud_error = str(exc).strip()[:240]
                 yield _sse(
                     "error",
                     {
@@ -1063,8 +1090,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                             else "The local Ollama service is unavailable. Start Ollama "
                             "and verify the selected model."
                             if provider == "local"
-                            else "The configured cloud provider could not complete "
-                            "the request. Check the API key, model, and provider limits."
+                            else cloud_error
+                            or "The cloud provider could not complete the request. "
+                            "Check the API key, model, and provider limits."
                         ),
                     },
                 )

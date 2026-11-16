@@ -194,8 +194,106 @@ class WebApplicationTests(unittest.TestCase):
         provider_message = calls["messages"][0]
         self.assertNotIn("images", provider_message)
         self.assertEqual(
+            {key: value for key, value in calls.items() if key != "messages"},
+            {
+                "model": "vision-model",
+                "temperature": 0.3,
+                "stream": True,
+            },
+        )
+        self.assertEqual(
             provider_message["content"][1]["image_url"]["url"],
             "data:image/png;base64,cG5n",
+        )
+
+    def test_cloud_stream_discards_malformed_messages(self) -> None:
+        calls: dict[str, object] = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs: object):
+                calls.update(kwargs)
+                return iter([])
+
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=FakeCompletions())
+        )
+        messages = [
+            {"role": "developer", "content": "unsupported"},
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": "   "},
+            {"role": "user", "content": 123},
+            {"role": "system", "content": "Instructions"},
+            {"role": "user", "content": "Hello"},
+        ]
+        with patch.object(web, "_cloud_client", return_value=client):
+            self.assertEqual(
+                list(web._stream_cloud("test-model", "https://api.example|key", messages)),
+                [],
+            )
+        self.assertEqual(
+            calls["messages"],
+            [
+                {"role": "system", "content": "Instructions"},
+                {"role": "user", "content": "Hello"},
+            ],
+        )
+
+    def test_cloud_status_filters_non_chat_models(self) -> None:
+        models_response = SimpleNamespace(
+            data=[
+                SimpleNamespace(id="llama-3.3-70b-versatile"),
+                SimpleNamespace(id="whisper-large-v3"),
+                SimpleNamespace(id="orpheus-3b"),
+                SimpleNamespace(id="prompt-guard-2"),
+                SimpleNamespace(id="llama-guard-safeguard"),
+                SimpleNamespace(id="llama-3.1-8b-instant"),
+            ]
+        )
+        client = SimpleNamespace(
+            models=SimpleNamespace(list=lambda: models_response)
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "AI_PROVIDER": "cloud",
+                "CLOUD_API_KEY": "test-key",
+                "CLOUD_MODEL": "whisper-large-v3",
+            },
+            clear=False,
+        ), patch.object(web, "_cloud_client", return_value=client):
+            response = self.client.get("/api/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["model"], "llama-3.3-70b-versatile")
+        self.assertEqual(
+            response.json["models"],
+            ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        )
+
+    def test_cloud_stream_error_is_logged_and_sent_to_the_ui(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "AI_PROVIDER": "cloud",
+                "CLOUD_API_KEY": "test-key",
+                "CLOUD_MODEL": "llama-3.3-70b-versatile",
+            },
+            clear=False,
+        ), patch.object(
+            web, "_stream_cloud", side_effect=RuntimeError("model is unavailable")
+        ), patch("builtins.print") as print_mock:
+            response = self.client.post(
+                "/api/chat/stream",
+                json={"message": "Hello"},
+                buffered=True,
+            )
+        self.assertIn(b"model is unavailable", response.data)
+        self.assertEqual(
+            print_mock.call_args_list[0].args,
+            ("GROQ ERROR:", "RuntimeError('model is unavailable')"),
+        )
+        self.assertEqual(
+            print_mock.call_args_list[0].kwargs,
+            {"flush": True},
         )
 
     def test_restricted_python_runner_and_public_mode_block(self) -> None:
