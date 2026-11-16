@@ -47,10 +47,24 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(model, "test-model")
         self.assertTrue(target.endswith("|test-token"))
 
+    def test_groq_model_defaults_to_qwen(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test-token"},
+            clear=True,
+        ):
+            _, model, _ = web._active_provider()
+        self.assertEqual(model, "qwen/qwen3.8-27b")
+
     def test_local_provider_defaults_to_qwen(self) -> None:
         with patch.dict(os.environ, {"AI_PROVIDER": "local"}, clear=True):
             _, model, _ = web._active_provider()
         self.assertEqual(model, "qwen2.5:14b")
+
+    def test_cloud_client_allows_one_sdk_retry(self) -> None:
+        with patch.object(web, "OpenAI", return_value=object()) as client:
+            web._cloud_client("https://api.groq.com/openai/v1|test-token")
+        self.assertEqual(client.call_args.kwargs["max_retries"], 1)
 
     def test_stream_saves_history_and_emits_sse_events(self) -> None:
         chat_id = "a" * 32
@@ -206,7 +220,7 @@ class WebApplicationTests(unittest.TestCase):
             {key: value for key, value in calls.items() if key != "messages"},
             {
                 "model": "vision-model",
-                "temperature": 0.3,
+                "temperature": 0.2,
                 "stream": True,
             },
         )

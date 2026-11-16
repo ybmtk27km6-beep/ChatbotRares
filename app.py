@@ -147,7 +147,7 @@ def _cloud_credentials() -> tuple[str, str, str] | None:
         return (
             os.environ["GROQ_API_KEY"],
             os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
-            os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
         )
     if os.environ.get("OPENROUTER_API_KEY"):
         return (
@@ -323,7 +323,7 @@ def _stream_cloud(
             ]
         provider_messages.append({"role": role, "content": content})
     stream = client.chat.completions.create(
-        model=model, messages=provider_messages, temperature=0.3, stream=True
+        model=model, messages=provider_messages, temperature=0.2, stream=True
     )
     for chunk in stream:
         if not chunk.choices:
