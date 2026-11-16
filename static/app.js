@@ -253,6 +253,16 @@
       target.textContent = markdown;
       return;
     }
+    const mathExpressions = [];
+    const protectedMarkdown = markdown.replace(
+      /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\]|(^|[^$])(\$(?!\$)(?:\\.|[^\\$\n])+\$(?!\$))/g,
+      (expression, prefix, inline) => {
+        const math = inline || expression;
+        const placeholder = `@@MATH_${mathExpressions.length}@@`;
+        mathExpressions.push(math);
+        return inline ? `${prefix}${placeholder}` : placeholder;
+      },
+    );
     const renderer = new marked.Renderer();
     renderer.link = ({ href, title, text }) => {
       let safeUrl = "#";
@@ -267,19 +277,30 @@
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
       return `<a href="${escapeHtml(safeUrl)}" rel="noopener noreferrer" target="_blank"${titleAttr}>${text}</a>`;
     };
-    const html = marked.parse(markdown, { breaks: true, gfm: true, renderer });
+    const html = marked.parse(protectedMarkdown, { breaks: true, gfm: true, renderer });
     target.innerHTML = DOMPurify.sanitize(html, {
       USE_PROFILES: { html: true },
       ADD_ATTR: ["target", "rel"],
     });
     decorateCodeBlocks(target);
+    if (mathExpressions.length) {
+      const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+      const placeholderPattern = /@@MATH_(\d+)@@/g;
+      let textNode;
+      while ((textNode = walker.nextNode())) {
+        textNode.nodeValue = textNode.nodeValue.replace(
+          placeholderPattern,
+          (placeholder, index) => mathExpressions[Number(index)] || placeholder,
+        );
+      }
+    }
     if (window.renderMathInElement) {
       renderMathInElement(target, {
         delimiters: [
           { left: "$$", right: "$$", display: true },
           { left: "\\[", right: "\\]", display: true },
-          { left: "\\(", right: "\\)", display: false },
           { left: "$", right: "$", display: false },
+          { left: "\\(", right: "\\)", display: false },
         ],
         throwOnError: false,
         ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],

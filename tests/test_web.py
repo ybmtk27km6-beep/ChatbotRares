@@ -56,6 +56,8 @@ class WebApplicationTests(unittest.TestCase):
         chat_id = "a" * 32
 
         def fake_stream(_model: str, _messages: list[dict[str, object]]):
+            self.assertIn("single dollar signs ($...$)", _messages[0]["content"])
+            self.assertIn("double dollar signs ($$...$$)", _messages[0]["content"])
             yield "Hello "
             yield "local."
 
@@ -83,6 +85,13 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(record["messages"][1]["content"], "Hello local.")
         self.assertEqual(record["messages"][0]["display_content"], "Say hello\n📄 notes.txt")
         self.assertEqual(record["style"], "steps")
+
+    def test_katex_assets_are_allowed_by_content_security_policy(self) -> None:
+        response = self.client.get("/")
+        policy = response.headers["Content-Security-Policy"]
+        self.assertIn("https://cdn.jsdelivr.net", policy.split("script-src ", 1)[1].split(";", 1)[0])
+        self.assertIn("https://cdn.jsdelivr.net", policy.split("style-src ", 1)[1].split(";", 1)[0])
+        self.assertIn("https://cdn.jsdelivr.net", policy.split("font-src ", 1)[1].split(";", 1)[0])
 
     def test_upload_extracts_text_without_persisting_upload(self) -> None:
         response = self.client.post(
