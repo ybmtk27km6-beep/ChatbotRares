@@ -248,9 +248,24 @@
     if (list.childElementCount) container.append(list);
   }
 
+  function renderMath(target) {
+    if (!window.renderMathInElement) return;
+    renderMathInElement(target, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\(", right: "\\)", display: false },
+      ],
+      throwOnError: false,
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
+    });
+  }
+
   function renderMarkdown(target, markdown) {
     if (!window.marked || !window.DOMPurify) {
       target.textContent = markdown;
+      renderMath(target);
       return;
     }
     const mathExpressions = [];
@@ -294,18 +309,7 @@
         );
       }
     }
-    if (window.renderMathInElement) {
-      renderMathInElement(target, {
-        delimiters: [
-          { left: "$$", right: "$$", display: true },
-          { left: "\\[", right: "\\]", display: true },
-          { left: "$", right: "$", display: false },
-          { left: "\\(", right: "\\)", display: false },
-        ],
-        throwOnError: false,
-        ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
-      });
-    }
+    renderMath(target);
     $$("a", target).forEach((link) => {
       link.addEventListener("click", (event) => {
         const url = new URL(link.href, window.location.href);
