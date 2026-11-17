@@ -56,6 +56,19 @@ class WebApplicationTests(unittest.TestCase):
             _, model, _ = web._active_provider()
         self.assertEqual(model, "qwen/qwen3.8-27b")
 
+    def test_cloud_credentials_expose_configured_vision_model(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "CLOUD_API_KEY": "test-token",
+                "CLOUD_VISION_MODEL": "vision-model",
+            },
+            clear=True,
+        ):
+            credentials = web._cloud_credentials()
+        self.assertIsNotNone(credentials)
+        self.assertEqual(credentials[3], "vision-model")
+
     def test_local_provider_defaults_to_qwen(self) -> None:
         with patch.dict(os.environ, {"AI_PROVIDER": "local"}, clear=True):
             _, model, _ = web._active_provider()
@@ -175,6 +188,42 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(received["model"], "qwen2.5vl:7b")
         messages = received["messages"]
         self.assertEqual(messages[-1]["images"][0]["name"], "diagram.png")
+
+    def test_cloud_image_chat_routes_to_configured_vision_model(self) -> None:
+        received: dict[str, object] = {}
+
+        def fake_stream(model: str, _target: str, _messages: list[dict[str, object]]):
+            received["model"] = model
+            yield "A diagram."
+
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        with patch.dict(
+            os.environ,
+            {
+                "AI_PROVIDER": "cloud",
+                "CLOUD_API_KEY": "test-token",
+                "CLOUD_MODEL": "llama-3.3-70b-versatile",
+                "CLOUD_VISION_MODEL": "meta-llama/llama-4-scout-17b-16e-instruct",
+            },
+            clear=False,
+        ), patch.object(web, "_stream_cloud", fake_stream):
+            response = self.client.post(
+                "/api/chat/stream",
+                json={
+                    "conversation_id": "d" * 32,
+                    "message": "Read the diagram",
+                    "images": [
+                        {
+                            "name": "diagram.png",
+                            "mime_type": "image/png",
+                            "data": web.base64.b64encode(png).decode("ascii"),
+                        }
+                    ],
+                },
+                buffered=True,
+            )
+        self.assertIn(b"event: done", response.data)
+        self.assertEqual(received["model"], "meta-llama/llama-4-scout-17b-16e-instruct")
 
     def test_cloud_stream_encodes_images_as_openai_compatible_content(self) -> None:
         calls: dict[str, object] = {}
@@ -319,6 +368,68 @@ class WebApplicationTests(unittest.TestCase):
             {"flush": True},
         )
 
+    def test_cloud_image_rejection_has_actionable_sse_error(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        with patch.dict(
+            os.environ,
+            {
+                "AI_PROVIDER": "cloud",
+                "CLOUD_API_KEY": "test-key",
+                "CLOUD_MODEL": "llama-3.3-70b-versatile",
+                "CLOUD_VISION_MODEL": "vision-model",
+            },
+            clear=False,
+        ), patch.object(
+            web, "_stream_cloud", side_effect=RuntimeError("invalid image_url content")
+        ), patch("builtins.print"):
+            response = self.client.post(
+                "/api/chat/stream",
+                json={
+                    "message": "Describe it",
+                    "images": [
+                        {
+                            "name": "diagram.png",
+                            "mime_type": "image/png",
+                            "data": web.base64.b64encode(png).decode("ascii"),
+                        }
+                    ],
+                },
+                buffered=True,
+            )
+        self.assertIn(b"event: error", response.data)
+        self.assertIn(b"CLOUD_VISION_MODEL", response.data)
+        self.assertIn(b"invalid image_url content", response.data)
+
+    def test_missing_local_vision_model_has_actionable_sse_error(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        with patch.dict(
+            os.environ,
+            {
+                "AI_PROVIDER": "local",
+                "OLLAMA_VISION_MODEL": "qwen2.5vl:7b",
+            },
+            clear=False,
+        ), patch.object(
+            web, "_stream_local", side_effect=RuntimeError("model not found")
+        ):
+            response = self.client.post(
+                "/api/chat/stream",
+                json={
+                    "message": "Describe it",
+                    "images": [
+                        {
+                            "name": "diagram.png",
+                            "mime_type": "image/png",
+                            "data": web.base64.b64encode(png).decode("ascii"),
+                        }
+                    ],
+                },
+                buffered=True,
+            )
+        self.assertIn(b"event: error", response.data)
+        self.assertIn(b"OLLAMA_VISION_MODEL", response.data)
+        self.assertIn(b"ollama pull qwen2.5vl:7b", response.data)
+
     def test_restricted_python_runner_and_public_mode_block(self) -> None:
         with patch.dict(os.environ, {"AI_PROVIDER": "local", "APP_MODE": "local"}, clear=False):
             result = self.client.post(
@@ -424,6 +535,42 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(
             call["options"],
             {"num_ctx": 4096, "temperature": 0.3, "repeat_penalty": 1.15},
+        )
+
+    def test_local_stream_converts_image_dicts_to_ollama_image_data(self) -> None:
+        calls: dict[str, object] = {}
+
+        class FakeClient:
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            def chat(self, **kwargs: object):
+                calls.update(kwargs)
+                return iter([{"message": {"content": "ok"}}])
+
+        messages = [
+            {"role": "system", "content": "Be helpful"},
+            {
+                "role": "user",
+                "content": "Describe it",
+                "images": [
+                    {"name": "one.png", "mime_type": "image/png", "data": "cG5n"},
+                    {"name": "two.jpg", "mime_type": "image/jpeg", "data": "anBn"},
+                ],
+            },
+        ]
+        with patch.object(web.ollama, "Client", FakeClient):
+            self.assertEqual(list(web._stream_local("vision-model", messages)), ["ok"])
+        self.assertEqual(
+            calls["messages"],
+            [
+                {"role": "system", "content": "Be helpful"},
+                {
+                    "role": "user",
+                    "content": "Describe it",
+                    "images": ["cG5n", "anBn"],
+                },
+            ],
         )
 
     def test_rejects_bad_conversation_id(self) -> None:

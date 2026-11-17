@@ -136,18 +136,21 @@ def _safe_model(value: Any) -> str:
     return model
 
 
-def _cloud_credentials() -> tuple[str, str, str] | None:
+def _cloud_credentials() -> tuple[str, str, str, str] | None:
+    vision_model = os.environ.get("CLOUD_VISION_MODEL", "").strip()
     if os.environ.get("CLOUD_API_KEY"):
         return (
             os.environ["CLOUD_API_KEY"],
             os.environ.get("CLOUD_BASE_URL", "https://api.groq.com/openai/v1"),
             os.environ.get("CLOUD_MODEL", "llama-3.3-70b-versatile"),
+            vision_model,
         )
     if os.environ.get("GROQ_API_KEY"):
         return (
             os.environ["GROQ_API_KEY"],
             os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
             os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
+            vision_model,
         )
     if os.environ.get("OPENROUTER_API_KEY"):
         return (
@@ -156,12 +159,14 @@ def _cloud_credentials() -> tuple[str, str, str] | None:
             os.environ.get(
                 "OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct"
             ),
+            vision_model,
         )
     if os.environ.get("OPENAI_API_KEY"):
         return (
             os.environ["OPENAI_API_KEY"],
             os.environ.get("OPENAI_BASE_URL", ""),
             os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+            vision_model,
         )
     return None
 
@@ -191,7 +196,7 @@ def _active_provider() -> tuple[str, str, str]:
 
     if cloud_credentials is None:
         raise RuntimeError("Cloud mode requires CLOUD_API_KEY or a provider API key.")
-    key, base_url, model = cloud_credentials
+    key, base_url, model, _ = cloud_credentials
     return provider, model, f"{base_url}|{key}"
 
 
@@ -257,6 +262,22 @@ def _validate_images(value: Any) -> list[dict[str, str]]:
     return images
 
 
+def _supports_vision(model: str) -> bool:
+    return any(
+        marker in model.lower()
+        for marker in (
+            "vision",
+            "llava",
+            "qwen2.5vl",
+            "qwen3-vl",
+            "llama-4-scout",
+            "gpt-4o",
+            "gpt-4.1",
+            "gemini",
+        )
+    )
+
+
 def _stream_local(
     model: str, messages: list[dict[str, Any]]
 ) -> Iterator[str]:
@@ -264,9 +285,19 @@ def _stream_local(
         host=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
         timeout=float(os.environ.get("OLLAMA_TIMEOUT", "180")),
     )
+    ollama_messages = [
+        {
+            "role": message["role"],
+            "content": message["content"],
+            "images": [image["data"] for image in message["images"]],
+        }
+        if "images" in message
+        else message
+        for message in messages
+    ]
     for chunk in client.chat(
         model=model,
-        messages=messages,
+        messages=ollama_messages,
         stream=True,
         keep_alive="30m",
         options={
@@ -911,12 +942,17 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         try:
             provider, configured_model, cloud_target = _active_provider()
             model = _safe_model(body.get("model") or configured_model)
-            if images and provider == "local" and not any(
-                marker in model.lower() for marker in ("vision", "llava", "qwen2.5vl", "qwen3-vl")
-            ):
+            if images and provider == "local" and not _supports_vision(model):
                 model = _safe_model(
                     os.environ.get("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
                 )
+            elif images and provider == "cloud" and not _supports_vision(model):
+                cloud_credentials = _cloud_credentials()
+                vision_model = (
+                    cloud_credentials[3] if cloud_credentials is not None else ""
+                )
+                if vision_model:
+                    model = _safe_model(vision_model)
             persona = str(body.get("persona", "Academic Tutor"))
             if persona not in PERSONAS:
                 persona = "Academic Tutor"
@@ -1079,16 +1115,32 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                     "AI streaming failed for provider=%s model=%s", provider, model
                 )
                 cloud_error = str(exc).strip()[:240]
+                cloud_error_lower = cloud_error.lower()
+                cloud_image_error = images and provider == "cloud" and (
+                    any(
+                        marker in cloud_error_lower
+                        for marker in ("image", "vision", "multimodal")
+                    )
+                    or getattr(exc, "status_code", None) == 400
+                )
                 yield _sse(
                     "error",
                     {
                         "message": (
                             (
-                                "The local Ollama service is unavailable or the "
-                                "selected model cannot process this image. Start Ollama "
-                                "and install a vision model such as qwen2.5vl:7b."
+                                "Ollama could not process the attached image. Check that "
+                                "OLLAMA_VISION_MODEL is installed (for example, run "
+                                f"`ollama pull {os.environ.get('OLLAMA_VISION_MODEL', 'qwen2.5vl:7b')}`) "
+                                "and that Ollama is running."
                             )
                             if provider == "local" and images
+                            else (
+                                f"The cloud model '{model}' rejected the image input "
+                                f"(image_url). Set CLOUD_VISION_MODEL to an image-capable "
+                                f"model supported by your provider. Provider detail: "
+                                f"{cloud_error or 'unsupported image input'}"
+                            )
+                            if cloud_image_error
                             else "The local Ollama service is unavailable. Start Ollama "
                             "and verify the selected model."
                             if provider == "local"

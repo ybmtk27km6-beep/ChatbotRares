@@ -183,7 +183,14 @@
       card.innerHTML = '<span class="thinking">AI scrie…<span class="thinking-dots"><i></i><i></i><i></i></span></span>';
     } else if (isUser) {
       card.textContent = text;
-      (options.images || []).forEach((image) => {
+      const images = options.images || [];
+      if (images.length) {
+        const indicator = document.createElement("span");
+        indicator.className = "message-attachment-indicator";
+        indicator.textContent = `${images.length} image${images.length === 1 ? "" : "s"} attached`;
+        card.append(indicator);
+      }
+      images.forEach((image) => {
         const preview = document.createElement("img");
         preview.className = "message-image-preview";
         preview.src = `data:${image.mime_type};base64,${image.data}`;
@@ -685,6 +692,7 @@
   async function attachFiles(fileList) {
     const files = [...fileList];
     if (!files.length) return;
+    if (state.busy) return showToast("Wait for the current response to finish.");
     if (files.length + state.attachments.length > 5) {
       showToast("Attach up to five documents and images at a time.", true);
       return;
@@ -693,7 +701,7 @@
     files.forEach((file) => form.append("files", file));
     const pill = document.createElement("div");
     pill.className = "upload-pill";
-    pill.textContent = "Reading documents…";
+    pill.textContent = "Processing attachments…";
     elements.pills.append(pill);
     try {
       const { response } = await api("/upload", { method: "POST", body: form });
@@ -703,10 +711,29 @@
       showToast(`${data.files.length} file(s) attached`);
     } catch (error) {
       pill.remove();
-      showToast(`Could not read document: ${error.message}`, true);
+      showToast(`Could not attach file: ${error.message}`, true);
     } finally {
       elements.attach.value = "";
     }
+  }
+
+  function clipboardImageFiles(clipboardData) {
+    const extensions = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/webp": "webp",
+    };
+    return [...clipboardData.items]
+      .filter((item) => item.kind === "file" && extensions[item.type.toLowerCase()])
+      .map((item) => item.getAsFile())
+      .filter(Boolean)
+      .map((file, index) => {
+        if (file.name) return file;
+        const extension = extensions[file.type.toLowerCase()];
+        return new File([file], `pasted-image-${Date.now()}-${index}.${extension}`, {
+          type: file.type,
+        });
+      });
   }
 
   function renderAttachmentPills() {
@@ -1026,7 +1053,29 @@
 
   function bindEvents() {
     elements.form.addEventListener("submit", submitMessage);
+    elements.form.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+      elements.form.classList.add("drag-over");
+    });
+    elements.form.addEventListener("dragleave", (event) => {
+      if (!elements.form.contains(event.relatedTarget)) {
+        elements.form.classList.remove("drag-over");
+      }
+    });
+    elements.form.addEventListener("drop", (event) => {
+      if (!event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      elements.form.classList.remove("drag-over");
+      attachFiles(event.dataTransfer.files);
+    });
     elements.input.addEventListener("input", resizeInput);
+    elements.input.addEventListener("paste", (event) => {
+      const files = clipboardImageFiles(event.clipboardData);
+      if (!files.length) return;
+      event.preventDefault();
+      attachFiles(files);
+    });
     elements.input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();

@@ -118,6 +118,7 @@ For Groq (OpenAI-compatible API), set:
 CLOUD_API_KEY=your-provider-key
 CLOUD_BASE_URL=https://api.groq.com/openai/v1
 CLOUD_MODEL=llama-3.3-70b-versatile
+CLOUD_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 ```
 
 `CLOUD_BASE_URL` is an API endpoint, not the provider's marketing website URL.
@@ -136,8 +137,13 @@ publishing a link. A public app using your key can consume your quota.
 
 For local image analysis, the selected Ollama model is switched to
 `OLLAMA_VISION_MODEL` when necessary. The default is `qwen2.5vl:7b`; install it
-with `ollama pull qwen2.5vl:7b`. Cloud vision requests require a vision-capable
-model configured in `CLOUD_MODEL`. Text-only models may reject images.
+with `ollama pull qwen2.5vl:7b`. For cloud image analysis, set
+`CLOUD_VISION_MODEL` to an image-capable model available for your configured
+provider. When the selected cloud model is not recognized as vision-capable,
+image requests automatically switch to this model. Examples include
+`meta-llama/llama-4-scout-17b-16e-instruct` or
+`llama-3.2-90b-vision-preview` for Groq-compatible APIs and `gpt-4o-mini` for
+OpenAI. Model availability and accepted image formats depend on the provider.
 
 ## Free cloud deployment (Render)
 
